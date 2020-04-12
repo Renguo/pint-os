@@ -28,6 +28,8 @@
 #include "userprog/gdt.h"
 #include "userprog/syscall.h"
 #include "userprog/tss.h"
+#include "vm/frametable.h"
+#include "vm/swap.h"
 #else
 #include "tests/threads/tests.h"
 #endif
@@ -36,6 +38,7 @@
 #include "devices/ide.h"
 #include "filesys/filesys.h"
 #include "filesys/fsutil.h"
+#include "filesys/inode.h"
 #endif
 
 /* Page directory with kernel mappings only. */
@@ -113,6 +116,7 @@ main (void)
 #ifdef USERPROG
   exception_init ();
   syscall_init ();
+  frametable_init ();
 #endif
 
   /* Start thread scheduler and enable interrupts. */
@@ -125,6 +129,11 @@ main (void)
   ide_init ();
   locate_block_devices ();
   filesys_init (format_filesys);
+  thread_current ()->cwd = inode_open (ROOT_DIR_SECTOR);
+#endif
+
+#ifdef USERPROG
+  swap_init ();
 #endif
 
   printf ("Boot complete.\n");
