@@ -18,6 +18,8 @@
 #include "threads/palloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "vm/page.h"
+#include "vm/frame.h"
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmd_line, void (**eip) (void), void **esp);
@@ -30,6 +32,7 @@ struct exec_info
     const char *file_name;              /* Program to load. */
     struct semaphore load_done;         /* "Up"ed when loading complete. */
     struct wait_status *wait_status;    /* Child process. */
+    struct dir *wd;                     /* Working directory. */
     bool success;                       /* Program successfully loaded? */
   };
 
@@ -40,6 +43,7 @@ struct exec_info
 tid_t
 process_execute (const char *file_name) 
 {
+  struct dir *wd = thread_current ()->wd;
   struct exec_info exec;
   char thread_name[16];
   char *save_ptr;
@@ -47,6 +51,9 @@ process_execute (const char *file_name)
 
   /* Initialize exec_info. */
   exec.file_name = file_name;
+  exec.wd = wd != NULL ? dir_reopen (wd) : dir_open_root ();
+  if (exec.wd == NULL)
+    return TID_ERROR;
   sema_init (&exec.load_done, 0);
 
   /* Create a new thread to execute FILE_NAME. */
@@ -58,9 +65,14 @@ process_execute (const char *file_name)
       sema_down (&exec.load_done);
       if (exec.success)
         list_push_back (&thread_current ()->children, &exec.wait_status->elem);
-      else
-        tid = TID_ERROR;
+      else 
+        {
+          tid = TID_ERROR;
+          /* Don't close exec.wd; child process will have done so. */
+        }
     }
+  else
+    dir_close (exec.wd);
 
   return tid;
 }
@@ -73,6 +85,8 @@ start_process (void *exec_)
   struct exec_info *exec = exec_;
   struct intr_frame if_;
   bool success;
+
+  thread_current ()->wd = exec->wd;
 
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
@@ -95,7 +109,6 @@ start_process (void *exec_)
       lock_init (&exec->wait_status->lock);
       exec->wait_status->ref_cnt = 2;
       exec->wait_status->tid = thread_current ()->tid;
-      exec->wait_status->exit_code = -1;
       sema_init (&exec->wait_status->dead, 0);
     }
   
@@ -167,14 +180,13 @@ process_exit (void)
   struct list_elem *e, *next;
   uint32_t *pd;
 
-  /* Close executable (and allow writes). */
-  file_close (cur->bin_file);
+  printf ("%s: exit(%d)\n", cur->name, cur->exit_code);
 
   /* Notify parent that we're dead. */
   if (cur->wait_status != NULL) 
     {
       struct wait_status *cs = cur->wait_status;
-      printf ("%s: exit(%d)\n", cur->name, cs->exit_code);
+      cs->exit_code = cur->exit_code;
       sema_up (&cs->dead);
       release_child (cs);
     }
@@ -187,7 +199,13 @@ process_exit (void)
       next = list_remove (e);
       release_child (cs);
     }
+
+  /* Destroy the page hash table. */
+  page_exit ();
   
+  /* Close executable (and allow writes). */
+  file_close (cur->bin_file);
+
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
   pd = cur->pagedir;
@@ -313,6 +331,12 @@ load (const char *cmd_line, void (**eip) (void), void **esp)
     goto done;
   process_activate ();
 
+  /* Create page hash table. */
+  t->pages = malloc (sizeof *t->pages);
+  if (t->pages == NULL)
+    goto done;
+  hash_init (t->pages, page_hash, page_less, NULL);
+
   /* Extract file_name from command line. */
   while (*cmd_line == ' ')
     cmd_line++;
@@ -322,7 +346,7 @@ load (const char *cmd_line, void (**eip) (void), void **esp)
     *cp = '\0';
 
   /* Open executable file. */
-  t->bin_file = file = filesys_open (file_name);
+  t->bin_file = file = file_open (filesys_open (file_name));
   if (file == NULL) 
     {
       printf ("load: %s: open failed\n", file_name);
@@ -418,8 +442,6 @@ load (const char *cmd_line, void (**eip) (void), void **esp)
 
 /* load() helpers. */
 
-static bool install_page (void *upage, void *kpage, bool writable);
-
 /* Checks whether PHDR describes a valid, loadable segment in
    FILE and returns true if so, false otherwise. */
 static bool
@@ -487,38 +509,22 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
   ASSERT (pg_ofs (upage) == 0);
   ASSERT (ofs % PGSIZE == 0);
 
-  file_seek (file, ofs);
   while (read_bytes > 0 || zero_bytes > 0) 
     {
-      /* Calculate how to fill this page.
-         We will read PAGE_READ_BYTES bytes from FILE
-         and zero the final PAGE_ZERO_BYTES bytes. */
       size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
       size_t page_zero_bytes = PGSIZE - page_read_bytes;
-
-      /* Get a page of memory. */
-      uint8_t *kpage = palloc_get_page (PAL_USER);
-      if (kpage == NULL)
+      struct page *p = page_allocate (upage, !writable);
+      if (p == NULL)
         return false;
-
-      /* Load this page. */
-      if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes)
+      if (page_read_bytes > 0) 
         {
-          palloc_free_page (kpage);
-          return false; 
+          p->file = file;
+          p->file_offset = ofs;
+          p->file_bytes = page_read_bytes;
         }
-      memset (kpage + page_read_bytes, 0, page_zero_bytes);
-
-      /* Add the page to the process's address space. */
-      if (!install_page (upage, kpage, writable)) 
-        {
-          palloc_free_page (kpage);
-          return false; 
-        }
-
-      /* Advance. */
       read_bytes -= page_read_bytes;
       zero_bytes -= page_zero_bytes;
+      ofs += page_read_bytes;
       upage += PGSIZE;
     }
   return true;
@@ -535,7 +541,7 @@ reverse (int argc, char **argv)
       argv[argc - 1] = tmp;
     }
 }
-
+ 
 /* Pushes the SIZE bytes in BUF onto the stack in KPAGE, whose
    page-relative stack pointer is *OFS, and then adjusts *OFS
    appropriately.  The bytes pushed are rounded to a 32-bit
@@ -611,37 +617,19 @@ init_cmd_line (uint8_t *kpage, uint8_t *upage, const char *cmd_line,
 static bool
 setup_stack (const char *cmd_line, void **esp) 
 {
-  uint8_t *kpage;
-  bool success = false;
-
-  kpage = palloc_get_page (PAL_USER | PAL_ZERO);
-  if (kpage != NULL) 
+  struct page *page = page_allocate (((uint8_t *) PHYS_BASE) - PGSIZE, false);
+  if (page != NULL) 
     {
-      uint8_t *upage = ((uint8_t *) PHYS_BASE) - PGSIZE;
-      if (install_page (upage, kpage, true))
-        success = init_cmd_line (kpage, upage, cmd_line, esp);
-      else
-        palloc_free_page (kpage);
+      page->frame = frame_alloc_and_lock (page);
+      if (page->frame != NULL)
+        {
+          bool ok;
+          page->read_only = false;
+          page->private = false;
+          ok = init_cmd_line (page->frame->base, page->addr, cmd_line, esp);
+          frame_unlock (page->frame);
+          return ok;
+        }
     }
-  return success;
-}
-
-/* Adds a mapping from user virtual address UPAGE to kernel
-   virtual address KPAGE to the page table.
-   If WRITABLE is true, the user process may modify the page;
-   otherwise, it is read-only.
-   UPAGE must not already be mapped.
-   KPAGE should probably be a page obtained from the user pool
-   with palloc_get_page().
-   Returns true on success, false if UPAGE is already mapped or
-   if memory allocation fails. */
-static bool
-install_page (void *upage, void *kpage, bool writable)
-{
-  struct thread *t = thread_current ();
-
-  /* Verify that there's not already a page at that virtual
-     address, then map our page there. */
-  return (pagedir_get_page (t->pagedir, upage) == NULL
-          && pagedir_set_page (t->pagedir, upage, kpage, writable));
+  return false;
 }
