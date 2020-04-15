@@ -70,7 +70,6 @@ file_read (struct file *file, void *buffer, off_t size)
 {
   off_t bytes_read = inode_read_at (file->inode, buffer, size, file->pos);
   file->pos += bytes_read;
-
   return bytes_read;
 }
 
@@ -97,7 +96,6 @@ file_write (struct file *file, const void *buffer, off_t size)
 {
   off_t bytes_written = inode_write_at (file->inode, buffer, size, file->pos);
   file->pos += bytes_written;
-
   return bytes_written;
 }
 
@@ -121,7 +119,6 @@ void
 file_deny_write (struct file *file) 
 {
   ASSERT (file != NULL);
-  
   if (!file->deny_write) 
     {
       file->deny_write = true;
@@ -136,7 +133,6 @@ void
 file_allow_write (struct file *file) 
 {
   ASSERT (file != NULL);
-  
   if (file->deny_write) 
     {
       file->deny_write = false;
@@ -149,7 +145,6 @@ off_t
 file_length (struct file *file) 
 {
   ASSERT (file != NULL);
-  
   return inode_length (file->inode);
 }
 
@@ -160,9 +155,6 @@ file_seek (struct file *file, off_t new_pos)
 {
   ASSERT (file != NULL);
   ASSERT (new_pos >= 0);
-  
-  if (new_pos >= MAX_FILE_SIZE)
-    new_pos = MAX_FILE_SIZE - 1;
   file->pos = new_pos;
 }
 
@@ -172,13 +164,5 @@ off_t
 file_tell (struct file *file) 
 {
   ASSERT (file != NULL);
-  
   return file->pos;
-}
-
-/* Returns whether or not this FILE is a directory. */
-bool
-file_is_dir (struct file *file)
-{
-  return inode_is_dir (file->inode);
 }

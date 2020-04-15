@@ -15,16 +15,15 @@
 void
 fsutil_ls (char **argv UNUSED) 
 {
-  int fd;
+  struct dir *dir;
   char name[NAME_MAX + 1];
   
   printf ("Files in the root directory:\n");
-  fd = fd_open ("/", false);
-  if (fd == -1)
+  dir = dir_open_root ();
+  if (dir == NULL)
     PANIC ("root dir open failed");
-  while (fd_readdir (fd, name))
+  while (dir_readdir (dir, name))
     printf ("%s\n", name);
-  fd_close (fd);
   printf ("End of listing.\n");
 }
 

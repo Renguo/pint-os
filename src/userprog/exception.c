@@ -1,15 +1,9 @@
 #include "userprog/exception.h"
 #include <inttypes.h>
 #include <stdio.h>
-#include <debug.h>
 #include "userprog/gdt.h"
-#include "userprog/pagedir.h"
-#include "vm/frametable.h"
-#include "vm/pageinfo.h"
-#include "vm/growstack.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
-#include "threads/vaddr.h"
 
 /* Number of page faults processed. */
 static long long page_fault_cnt;
@@ -128,7 +122,7 @@ kill (struct intr_frame *f)
 static void
 page_fault (struct intr_frame *f) 
 {
-  struct thread *cur = thread_current ();
+  bool not_present;  /* True: not-present page, false: writing r/o page. */
   bool write;        /* True: access was write, false: access was read. */
   bool user;         /* True: access by user, false: access by kernel. */
   void *fault_addr;  /* Fault address. */
@@ -150,13 +144,18 @@ page_fault (struct intr_frame *f)
   page_fault_cnt++;
 
   /* Determine cause. */
+  not_present = (f->error_code & PF_P) == 0;
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
-  if (!is_user_vaddr (fault_addr))
-      thread_exit ();
-  if (user)
-    thread_current ()->user_esp = f->esp;
-  maybe_grow_stack (cur->pagedir, fault_addr);
-  if (!frametable_load_frame (cur->pagedir, pg_round_down (fault_addr), write))
-      thread_exit ();
+
+  /* To implement virtual memory, delete the rest of the function
+     body, and replace it with code that brings in the page to
+     which fault_addr refers. */
+  printf ("Page fault at %p: %s error %s page in %s context.\n",
+          fault_addr,
+          not_present ? "not present" : "rights violation",
+          write ? "writing" : "reading",
+          user ? "user" : "kernel");
+  kill (f);
 }
+
