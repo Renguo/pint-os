@@ -6,10 +6,6 @@
 #include "filesys/cache.h"
 #include "devices/timer.h"
 
-/* Implements a cache cache.  caches are read in from the file system and 
-   cached for subsequent use.  Dirty caches are written back to the file 
-   system periodically by a background thread or when they are evicted to make
-   space for a new cache.  Asynchronous read ahead is supported. */
 
 /* cache flags. */
 /* If set, the cache is currently in use by a process. */

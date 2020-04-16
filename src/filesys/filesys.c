@@ -27,7 +27,7 @@ filesys_init (bool format)
   if (fs_device == NULL)
     PANIC ("No file system device found, can't initialize file system.");
 
-  buffers_init ();
+  caches_init ();
   inode_init ();
   free_map_init ();
 
@@ -50,7 +50,7 @@ filesys_init (bool format)
 void
 filesys_done (void) 
 {
-  buffers_done ();
+  caches_done ();
   free_map_close ();
 }
 
@@ -219,9 +219,9 @@ fd_size (int fd)
 }
 
 off_t
-fd_read (int fd, void *buffer_, off_t size)
+fd_read (int fd, void *cache_, off_t size)
 {
-  uint8_t *buffer = buffer_;
+  uint8_t *cache = cache_;
   struct file *file;
   off_t bytes_read = -1;
   uint8_t c;
@@ -235,20 +235,20 @@ fd_read (int fd, void *buffer_, off_t size)
           c = input_getc ();
           if (c == '\n')
             break;
-          buffer[bytes_read++] = c;
+          cache[bytes_read++] = c;
         }
     }
   else
     {
       file = fd_get_file (fd);
       if (file != NULL && !file_is_dir (file))
-        bytes_read = file_read (file, buffer, size);
+        bytes_read = file_read (file, cache, size);
     }
   return bytes_read;
 }
 
 off_t
-fd_write (int fd, const void *buffer, off_t size)
+fd_write (int fd, const void *cache, off_t size)
 {
   struct file *file;
   off_t bytes_written = -1;
@@ -256,14 +256,14 @@ fd_write (int fd, const void *buffer, off_t size)
   if (fd == STDOUT_FILENO)
     {
       /* Treat stdout as a special file descriptor that writes to the console. */
-      putbuf (buffer, size);
+      putbuf (cache, size);
       bytes_written = size;
     }
   else
     {
       file = fd_get_file (fd);
       if (file != NULL && !file_is_dir (file))
-        bytes_written = file_write (file, buffer, size);
+        bytes_written = file_write (file, cache, size);
     }
   return bytes_written;
 }

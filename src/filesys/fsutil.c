@@ -36,23 +36,23 @@ fsutil_cat (char **argv)
   const char *file_name = argv[1];
   
   struct file *file;
-  char *buffer;
+  char *cache;
 
   printf ("Printing '%s' to the console...\n", file_name);
   file = filesys_open (file_name);
   if (file == NULL)
     PANIC ("%s: open failed", file_name);
-  buffer = palloc_get_page (PAL_ASSERT);
+  cache = palloc_get_page (PAL_ASSERT);
   for (;;) 
     {
       off_t pos = file_tell (file);
-      off_t n = file_read (file, buffer, PGSIZE);
+      off_t n = file_read (file, cache, PGSIZE);
       if (n == 0)
         break;
 
-      hex_dump (pos, buffer, n, true); 
+      hex_dump (pos, cache, n, true); 
     }
-  palloc_free_page (buffer);
+  palloc_free_page (cache);
   file_close (file);
 }
 
@@ -77,11 +77,11 @@ fsutil_extract (char **argv UNUSED)
   struct block *src;
   void *header, *data;
 
-  /* Allocate buffers. */
+  /* Allocate caches. */
   header = malloc (BLOCK_SECTOR_SIZE);
   data = malloc (BLOCK_SECTOR_SIZE);
   if (header == NULL || data == NULL)
-    PANIC ("couldn't allocate buffers");
+    PANIC ("couldn't allocate caches");
 
   /* Open source block device. */
   src = block_get_role (BLOCK_SCRATCH);
@@ -169,17 +169,17 @@ fsutil_append (char **argv)
   static block_sector_t sector = 0;
 
   const char *file_name = argv[1];
-  void *buffer;
+  void *cache;
   struct file *src;
   struct block *dst;
   off_t size;
 
   printf ("Appending '%s' to ustar archive on scratch device...\n", file_name);
 
-  /* Allocate buffer. */
-  buffer = malloc (BLOCK_SECTOR_SIZE);
-  if (buffer == NULL)
-    PANIC ("couldn't allocate buffer");
+  /* Allocate cache. */
+  cache = malloc (BLOCK_SECTOR_SIZE);
+  if (cache == NULL)
+    PANIC ("couldn't allocate cache");
 
   /* Open source file. */
   src = filesys_open (file_name);
@@ -193,9 +193,9 @@ fsutil_append (char **argv)
     PANIC ("couldn't open scratch device");
   
   /* Write ustar header to first sector. */
-  if (!ustar_make_header (file_name, USTAR_REGULAR, size, buffer))
+  if (!ustar_make_header (file_name, USTAR_REGULAR, size, cache))
     PANIC ("%s: name too long for ustar format", file_name);
-  block_write (dst, sector++, buffer);
+  block_write (dst, sector++, cache);
 
   /* Do copy. */
   while (size > 0) 
@@ -203,21 +203,21 @@ fsutil_append (char **argv)
       int chunk_size = size > BLOCK_SECTOR_SIZE ? BLOCK_SECTOR_SIZE : size;
       if (sector >= block_size (dst))
         PANIC ("%s: out of space on scratch device", file_name);
-      if (file_read (src, buffer, chunk_size) != chunk_size)
+      if (file_read (src, cache, chunk_size) != chunk_size)
         PANIC ("%s: read failed with %"PROTd" bytes unread", file_name, size);
-      memset (buffer + chunk_size, 0, BLOCK_SECTOR_SIZE - chunk_size);
-      block_write (dst, sector++, buffer);
+      memset (cache + chunk_size, 0, BLOCK_SECTOR_SIZE - chunk_size);
+      block_write (dst, sector++, cache);
       size -= chunk_size;
     }
 
   /* Write ustar end-of-archive marker, which is two consecutive
      sectors full of zeros.  Don't advance our position past
      them, though, in case we have more files to append. */
-  memset (buffer, 0, BLOCK_SECTOR_SIZE);
-  block_write (dst, sector, buffer);
-  block_write (dst, sector, buffer + 1);
+  memset (cache, 0, BLOCK_SECTOR_SIZE);
+  block_write (dst, sector, cache);
+  block_write (dst, sector, cache + 1);
 
   /* Finish up. */
   file_close (src);
-  free (buffer);
+  free (cache);
 }

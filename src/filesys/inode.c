@@ -72,10 +72,10 @@ struct inode
 /* Returns the block device sector that contains byte offset POS
    within INODE. If there's no block device sector at offset POS
    allocates one. NOTE: This function is written in such a way 
-   as to never acquire more than one buffer at the same time 
-   (calls to free_map_allocate acquire a buffer) to avoid a 
+   as to never acquire more than one cache at the same time 
+   (calls to free_map_allocate acquire a cache) to avoid a 
    potential dealock situation where a cache size number of processes 
-   all acquire a buffer at the same time and attempt to acquire a second.*/
+   all acquire a cache at the same time and attempt to acquire a second.*/
 static bool
 byte_to_sector (struct inode *inode, bool is_dir, off_t pos,
                 block_sector_t *psector)
@@ -86,7 +86,7 @@ byte_to_sector (struct inode *inode, bool is_dir, off_t pos,
   block_sector_t sector;
   block_sector_t next_sector = 0;
   bool allocated = false;
-  struct buffer *buffer;
+  struct cache *cache;
   /* An indirect, doubly indirect or data sector's data. */
   block_sector_t *data;
   bool success = false;
@@ -99,31 +99,31 @@ byte_to_sector (struct inode *inode, bool is_dir, off_t pos,
   sector_idx = direct_sector_idx (pos);
   if (sector_idx >= NDIRECT_SECTORS)
     sector_idx = NDIRECT_SECTORS;
-  buffer = buffer_acquire (inode->sector, true);
-  inode->data = (struct inode_disk *) buffer->data;
+  cache = cache_acquire (inode->sector, true);
+  inode->data = (struct inode_disk *) cache->data;
   next_sector = inode->data->sectors[sector_idx];
   if (next_sector == 0)
     {
-      buffer_release (buffer, false);
+      cache_release (cache, false);
       /* Allocate and add a new indirect or data block. */
       if (!free_map_allocate (1, &next_sector))
         goto done;
       allocated = true;
-      buffer = buffer_acquire (inode->sector, true);
-      inode->data = (struct inode_disk *) buffer->data;        
+      cache = cache_acquire (inode->sector, true);
+      inode->data = (struct inode_disk *) cache->data;        
       inode->data->sectors[sector_idx] = next_sector;
-      buffer_release (buffer, true);
-      buffer = buffer_acquire (next_sector, sector_idx >= NDIRECT_SECTORS);
-      data = (block_sector_t *) buffer->data;
+      cache_release (cache, true);
+      cache = cache_acquire (next_sector, sector_idx >= NDIRECT_SECTORS);
+      data = (block_sector_t *) cache->data;
       memset (data, 0, BLOCK_SECTOR_SIZE);
     }
   else
-    buffer_release (buffer, false);
+    cache_release (cache, false);
   if (sector_idx < NDIRECT_SECTORS)
     {
       /* Data block. */
       if (allocated)
-        buffer_release (buffer, true);
+        cache_release (cache, true);
       *psector = next_sector;
       success = true;
       goto done;
@@ -134,50 +134,50 @@ byte_to_sector (struct inode *inode, bool is_dir, off_t pos,
       /* Indirect block. */
       if (!allocated)
         {
-          buffer = buffer_acquire (sector, true);
-          data = (block_sector_t *) buffer->data;
+          cache = cache_acquire (sector, true);
+          data = (block_sector_t *) cache->data;
         }
       sector_idx = indirect_sector_idx (pos);
       next_sector = data[sector_idx];
       if (next_sector == 0)
         {
-          buffer_release (buffer, false);
+          cache_release (cache, false);
           /* Allocate and add a new doubly indirect block. */
           if (!free_map_allocate (1, &next_sector))
             goto done;
-          buffer = buffer_acquire (sector, true);
-          data = (block_sector_t *) buffer->data;
+          cache = cache_acquire (sector, true);
+          data = (block_sector_t *) cache->data;
           data[sector_idx] = next_sector;
-          buffer_release (buffer, true);
-          buffer = buffer_acquire (next_sector, true);
-          data = (block_sector_t *) buffer->data;
+          cache_release (cache, true);
+          cache = cache_acquire (next_sector, true);
+          data = (block_sector_t *) cache->data;
           memset (data, 0, BLOCK_SECTOR_SIZE);
         }
       else
         {
-          buffer_release (buffer, false);
-          buffer = buffer_acquire (next_sector, true);
-          data = (block_sector_t *) buffer->data;
+          cache_release (cache, false);
+          cache = cache_acquire (next_sector, true);
+          data = (block_sector_t *) cache->data;
         }
       sector = next_sector;
       sector_idx = dindirect_sector_idx (pos);
       next_sector = data[sector_idx];
       if (next_sector == 0)
         {
-          buffer_release (buffer, false);
+          cache_release (cache, false);
           if (!free_map_allocate (1, &next_sector))
             goto done;
-          buffer = buffer_acquire (sector, true);
-          data = (block_sector_t *) buffer->data;          
+          cache = cache_acquire (sector, true);
+          data = (block_sector_t *) cache->data;          
           data[sector_idx] = next_sector;
-          buffer_release (buffer, true);
-          buffer = buffer_acquire (next_sector, false);
-          data = (block_sector_t *) buffer->data;
+          cache_release (cache, true);
+          cache = cache_acquire (next_sector, false);
+          data = (block_sector_t *) cache->data;
           memset (data, 0, BLOCK_SECTOR_SIZE);
-          buffer_release (buffer, true);
+          cache_release (cache, true);
         }
       else
-        buffer_release (buffer, false);
+        cache_release (cache, false);
     }
   *psector = next_sector;
   success = true;
@@ -209,7 +209,7 @@ bool
 inode_create (block_sector_t sector, off_t length, bool is_dir)
 {
   struct inode_disk *disk_inode = NULL;
-  struct buffer *buffer;
+  struct cache *cache;
   bool success = false;
 
   ASSERT (length >= 0);
@@ -224,9 +224,9 @@ inode_create (block_sector_t sector, off_t length, bool is_dir)
       disk_inode->length = length;
       disk_inode->magic = INODE_MAGIC;
       disk_inode->is_dir = is_dir;
-      buffer = buffer_acquire (sector, true);
-      memcpy (buffer->data, disk_inode, sizeof *disk_inode);
-      buffer_release (buffer, true);
+      cache = cache_acquire (sector, true);
+      memcpy (cache->data, disk_inode, sizeof *disk_inode);
+      cache_release (cache, true);
       success = true; 
       free (disk_inode);
     }
@@ -295,9 +295,9 @@ inode_get_inumber (const struct inode *inode)
    If this was the last reference to INODE, frees its memory.
    If INODE was also a removed inode, frees its blocks. NOTE: This 
    function is written in such a way a as to never acquire more than 
-   one buffer at the same time (calls to free_map_release acquire a 
-   buffer) to avoid a potential dealock situation where a cache size 
-   number of processes all acquire a buffer at the same time and attempt 
+   one cache at the same time (calls to free_map_release acquire a 
+   cache) to avoid a potential dealock situation where a cache size 
+   number of processes all acquire a cache at the same time and attempt 
    to acquire a second.*/
 void
 inode_close (struct inode *inode) 
@@ -308,7 +308,7 @@ inode_close (struct inode *inode)
   block_sector_t isector;
   /* A doubly indirect sector. */
   block_sector_t disector;
-  struct buffer *buffer;
+  struct cache *cache;
   /* An indirect or doubly indirect sector's data. */
   block_sector_t *data;
   size_t i;
@@ -329,8 +329,8 @@ inode_close (struct inode *inode)
       if (inode->removed) 
         {
           /* Free direct data blocks and disk inode. */
-          buffer = buffer_acquire (inode->sector, true);
-          inode->data = (struct inode_disk *) buffer->data;
+          cache = cache_acquire (inode->sector, true);
+          inode->data = (struct inode_disk *) cache->data;
           for (i = 0; i < NDIRECT_SECTORS; i++)
             {
               sector = inode->data->sectors[i];
@@ -338,25 +338,25 @@ inode_close (struct inode *inode)
                 free_map_release (sector, 1);
             }
           isector = inode->data->sectors[NDIRECT_SECTORS];
-          buffer_release (buffer, false);
+          cache_release (cache, false);
           free_map_release (inode->sector, 1);
           /* Free indirect, doubly indirect, and data blocks. */
           if (isector != 0)
             {
               for (i = 0; i < NINDIRECT_SECTORS; i++)
                 {
-                  buffer = buffer_acquire (isector, true);
-                  data = (block_sector_t *) buffer->data;
+                  cache = cache_acquire (isector, true);
+                  data = (block_sector_t *) cache->data;
                   disector = data[i];
-                  buffer_release (buffer, false);
+                  cache_release (cache, false);
                   if (disector != 0)
                     {
                       for (j = 0; j < NINDIRECT_SECTORS; j++)
                         {
-                          buffer = buffer_acquire (disector, true);
-                          data = (block_sector_t *) buffer->data;
+                          cache = cache_acquire (disector, true);
+                          data = (block_sector_t *) cache->data;
                           sector = data[j];
-                          buffer_release (buffer, false);
+                          cache_release (cache, false);
                           if (sector != 0)
                             free_map_release (sector, 1);
                         }
@@ -394,14 +394,14 @@ inode_remove (struct inode *inode)
   inode->removed = true;
 }
 
-/* Reads SIZE bytes from INODE into BUFFER, starting at position OFFSET.
+/* Reads SIZE bytes from INODE into cache, starting at position OFFSET.
    Returns the number of bytes actually read, which may be less
    than SIZE if an error occurs or end of file is reached. */
 off_t
-inode_read_at (struct inode *inode, void *buffer_, off_t size, off_t offset) 
+inode_read_at (struct inode *inode, void *cache_, off_t size, off_t offset) 
 {
-  struct buffer *cached_buffer;
-  uint8_t *buffer = buffer_;
+  struct cache *cached_cache;
+  uint8_t *cache = cache_;
   off_t bytes_read = 0;
   off_t length;
   bool is_dir;
@@ -432,10 +432,10 @@ inode_read_at (struct inode *inode, void *buffer_, off_t size, off_t offset)
       if (chunk_size <= 0)
         break;
 
-      cached_buffer = buffer_acquire (sector, false);
-      memcpy (buffer + bytes_read, cached_buffer->data + sector_ofs,
+      cached_cache = cache_acquire (sector, false);
+      memcpy (cache + bytes_read, cached_cache->data + sector_ofs,
               chunk_size);          
-      buffer_release (cached_buffer, false);
+      cache_release (cached_cache, false);
           
       /* Advance. */
       size -= chunk_size;
@@ -447,19 +447,19 @@ inode_read_at (struct inode *inode, void *buffer_, off_t size, off_t offset)
   new_offset = offset + BLOCK_SECTOR_SIZE - 1;
   if (size == 0 && new_offset > offset && new_offset < length
       && byte_to_sector (inode, is_dir, new_offset, &sector))
-    buffer_read_ahead (sector, false);
+    cache_read_ahead (sector, false);
   return bytes_read;
 }
 
-/* Writes SIZE bytes from BUFFER into INODE, starting at OFFSET.
+/* Writes SIZE bytes from cache into INODE, starting at OFFSET.
    Returns the number of bytes actually written, which may be
    less than SIZE if end of file is reached or an error occurs. */
 off_t
-inode_write_at (struct inode *inode, const void *buffer_, off_t size,
+inode_write_at (struct inode *inode, const void *cache_, off_t size,
                 off_t offset) 
 {
-  struct buffer *cached_buffer;
-  const uint8_t *buffer = buffer_;
+  struct cache *cached_cache;
+  const uint8_t *cache = cache_;
   off_t bytes_written = 0;
   off_t length;
   bool is_dir;
@@ -487,10 +487,10 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
       if (chunk_size <= 0)
         break;
       
-      cached_buffer = buffer_acquire (sector, false);
-      memcpy (cached_buffer->data + sector_ofs, buffer + bytes_written,
+      cached_cache = cache_acquire (sector, false);
+      memcpy (cached_cache->data + sector_ofs, cache + bytes_written,
               chunk_size);
-      buffer_release (cached_buffer, true);
+      cache_release (cached_cache, true);
 
       /* Advance. */
       size -= chunk_size;
@@ -504,7 +504,7 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
   new_offset = offset + BLOCK_SECTOR_SIZE - 1;
   if (size == 0 && new_offset > offset && new_offset < length
       && byte_to_sector (inode, is_dir, new_offset, &sector))
-    buffer_read_ahead (sector, false);
+    cache_read_ahead (sector, false);
   return bytes_written;
 }
 
@@ -532,13 +532,13 @@ inode_allow_write (struct inode *inode)
 off_t
 inode_length (struct inode *inode)
 {
-  struct buffer *buffer;
+  struct cache *cache;
   off_t length;
   
-  buffer = buffer_acquire (inode->sector, true);
-  inode->data = (struct inode_disk *) buffer->data;
+  cache = cache_acquire (inode->sector, true);
+  inode->data = (struct inode_disk *) cache->data;
   length = inode->data->length;
-  buffer_release (buffer, false);
+  cache_release (cache, false);
   return length;
 }
 
@@ -546,13 +546,13 @@ inode_length (struct inode *inode)
 bool
 inode_is_dir (struct inode *inode)
 {
-  struct buffer *buffer;
+  struct cache *cache;
   bool is_dir;
   
-  buffer = buffer_acquire (inode->sector, true);
-  inode->data = (struct inode_disk *) buffer->data;
+  cache = cache_acquire (inode->sector, true);
+  inode->data = (struct inode_disk *) cache->data;
   is_dir = inode->data->is_dir;
-  buffer_release (buffer, false);
+  cache_release (cache, false);
   return is_dir;
 }
 
@@ -566,19 +566,19 @@ inode_is_removed (struct inode *inode)
 static off_t
 update_length (struct inode *inode, off_t offset)
 {
-  struct buffer *buffer;
+  struct cache *cache;
   off_t length;
   
-  buffer = buffer_acquire (inode->sector, true);
-  inode->data = (struct inode_disk *) buffer->data;
+  cache = cache_acquire (inode->sector, true);
+  inode->data = (struct inode_disk *) cache->data;
   length = inode->data->length;
   if (offset > length)
     {
       length = offset;
       inode->data->length = length;
-      buffer_release (buffer, true);
+      cache_release (cache, true);
     }
   else
-    buffer_release (buffer, false);
+    cache_release (cache, false);
   return length;
 }
