@@ -3,7 +3,7 @@
 #include <limits.h>
 #include "threads/thread.h"
 #include "filesys/filesys.h"
-#include "filesys/buffers.h"
+#include "filesys/cache.h"
 #include "devices/timer.h"
 
 /* Implements a buffer cache.  Buffers are read in from the file system and 

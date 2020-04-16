@@ -1,5 +1,5 @@
-#ifndef FILESYS_BUFFER_H
-#define FILESYS_BUFFER_H
+#ifndef FILESYS_CACHE_H
+#define FILESYS_CACHE_H
 
 #include <stdint.h>
 #include <list.h>
@@ -30,4 +30,4 @@ struct buffer *buffer_acquire (block_sector_t sector, bool is_meta);
 void buffer_release (struct buffer *buffer, bool dirty);
 void buffer_read_ahead (block_sector_t sector, bool is_meta);
 
-#endif /* filesys/buffer.h */
+#endif 

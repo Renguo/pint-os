@@ -6,7 +6,7 @@
 #include <string.h>
 #include "filesys/filesys.h"
 #include "filesys/free-map.h"
-#include "filesys/buffers.h"
+#include "filesys/cache.h"
 #include "threads/malloc.h"
 
 /* Number of sector indices stored directly in the inode. */

@@ -6,7 +6,7 @@
 #include "filesys/free-map.h"
 #include "filesys/inode.h"
 #include "filesys/directory.h"
-#include "filesys/buffers.h"
+#include "filesys/cache.h"
 #include "filesys/path.h"
 #include "threads/thread.h"
 #include "devices/input.h"
